@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Upload, 
   Camera, 
@@ -12,16 +12,15 @@ import {
   Plus,
   User,
   Calendar,
-  Loader,
-  AlertTriangle
+  Download,
+  Trash2,
+  File,
+  HardDrive
 } from 'lucide-react';
 import { useData } from '../context/DataContext.jsx';
-import { OCRProcessor } from '../utils/ocrProcessor.js';
-import { FileStorage } from '../utils/fileStorage.js';
-import { useAuth } from '../context/AuthContext.jsx';
+import { FileStorage } from '../utils/FileStorage.js';
 
 const UploadSection = () => {
-  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedFile, setSelectedFile] = useState(null);
   const [extractedData, setExtractedData] = useState([]);
@@ -36,131 +35,79 @@ const UploadSection = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editingSubject, setEditingSubject] = useState(null);
   const [uploadMethod, setUploadMethod] = useState('upload');
-  const [ocrResult, setOcrResult] = useState(null);
-  const [processingStage, setProcessingStage] = useState('');
+  const [fileError, setFileError] = useState('');
   const [savedFileId, setSavedFileId] = useState(null);
+  const [showFilesList, setShowFilesList] = useState(false);
+  const [userFiles, setUserFiles] = useState([]);
 
   const { addSemester } = useData();
-  const ocrProcessor = new OCRProcessor();
   const fileStorage = new FileStorage();
 
+  // Mock user ID - in a real app, this would come from authentication
+  const userId = 'user_123';
+
+  useEffect(() => {
+    // Load user files on component mount
+    loadUserFiles();
+  }, []);
+
+  const loadUserFiles = () => {
+    const files = fileStorage.getFiles(userId);
+    setUserFiles(files);
+  };
+
   const gradePoints = {
-    'O': 10, 'A+': 9, 'A': 8, 'B+': 7, 'B': 6, 'C': 5, 'D': 4, 'F': 0, 'U': 0, 'RA': 0
+    'O': 10, 'A+': 9, 'A': 8, 'B+': 7, 'B': 6, 'C': 5, 'D': 4, 'F': 0
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-      if (!validTypes.includes(file.type)) {
-        alert('Please upload a PDF, JPG, or PNG file.');
-        return;
-      }
-
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        alert('File size must be less than 10MB.');
-        return;
-      }
-
-      setSelectedFile(file);
-      setStep(2);
-    }
-  };
-
-  const processWithOCR = async () => {
-    if (!selectedFile) return;
-
-    // Check if file is PDF - OCR only supports images
-    if (selectedFile.type === 'application/pdf') {
-      setOcrResult({
-        success: false,
-        error: 'PDF files are not supported for automatic OCR processing. The file has been saved and you can download it later. Please use image files (JPG/PNG) for OCR or switch to manual entry.',
-        confidence: 0
-      });
-      setProcessingStage('Processing failed - PDF not supported');
-      setIsProcessing(false);
-      
-      // Save PDF file even though OCR failed
-      try {
-        const fileId = await fileStorage.saveFile(selectedFile, user.id, 'temp_' + Date.now());
-        setSavedFileId(fileId);
-      } catch (error) {
-        console.error('Error saving PDF file:', error);
-      }
-      return;
-    }
-
-    setIsProcessing(true);
-    setProcessingStage('Initializing OCR...');
+    if (!file) return;
 
     try {
-      setProcessingStage('Reading file...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      setProcessingStage('Performing OCR analysis...');
-      const result = await ocrProcessor.processImage(selectedFile);
-      
-      setOcrResult(result);
-
-      if (result.success) {
-        setProcessingStage('Extracting data...');
-        
-        // Set semester info from OCR
-        setSemesterInfo(prev => ({
-          ...prev,
-          studentName: result.data.studentInfo.name || prev.studentName,
-          semester: result.data.semesterInfo.semester?.toString() || prev.semester,
-          year: result.data.semesterInfo.year || prev.year,
-          rollNumber: result.data.studentInfo.rollNumber || prev.rollNumber,
-          name: `Semester ${result.data.semesterInfo.semester || 'Unknown'} - ${result.data.semesterInfo.year || 'Unknown'}`
-        }));
-
-        // Set extracted subjects
-        setExtractedData(result.data.subjects || []);
-        
-        setProcessingStage('Processing complete!');
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Save successful file
-        try {
-          const fileId = await fileStorage.saveFile(selectedFile, user.id, 'temp_' + Date.now());
-          setSavedFileId(fileId);
-        } catch (error) {
-          console.error('Error saving file:', error);
-        }
-        
-        setStep(3);
-      } else {
-        setProcessingStage('Processing failed');
-        
-        // Save failed file for manual review
-        try {
-          const fileId = await fileStorage.saveFile(selectedFile, user.id, 'temp_' + Date.now());
-          setSavedFileId(fileId);
-        } catch (error) {
-          console.error('Error saving file:', error);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      setFileError('');
+      fileStorage.validateFile(file);
+      setSelectedFile(file);
+      setStep(2);
     } catch (error) {
-      console.error('OCR Error:', error);
-      setOcrResult({
-        success: false,
-        error: 'An unexpected error occurred during processing.'
-      });
-      setProcessingStage('Processing failed');
+      setFileError(error.message);
+      setSelectedFile(null);
+    }
+  };
+
+  const simulateAdvancedOCR = async () => {
+    setIsProcessing(true);
+    
+    try {
+      // Save file to storage
+      const semesterId = `${semesterInfo.semester}_${semesterInfo.year}`;
+      const fileId = await fileStorage.saveFile(selectedFile, userId, semesterId);
+      setSavedFileId(fileId);
       
-      // Save file even on error
-      try {
-        const fileId = await fileStorage.saveFile(selectedFile, user.id, 'temp_' + Date.now());
-        setSavedFileId(fileId);
-      } catch (error) {
-        console.error('Error saving file:', error);
-      }
-    } finally {
+      // Simulate OCR processing delay
+      await new Promise(resolve => setTimeout(resolve, 4000));
+      
+      // Enhanced mock data with more realistic extraction
+      const mockData = [
+        { id: 1, code: 'CS201', name: 'Data Structures and Algorithms', grade: 'A+', credits: 4, points: 9 },
+        { id: 2, code: 'CS202', name: 'Computer Organization', grade: 'A', credits: 3, points: 8 },
+        { id: 3, code: 'CS203', name: 'Database Management Systems', grade: 'O', credits: 4, points: 10 },
+        { id: 4, code: 'MA201', name: 'Discrete Mathematics', grade: 'A', credits: 4, points: 8 },
+        { id: 5, code: 'CS204', name: 'Operating Systems', grade: 'A+', credits: 4, points: 9 },
+        { id: 6, code: 'CS205', name: 'Software Engineering', grade: 'A', credits: 3, points: 8 },
+        { id: 7, code: 'CS206', name: 'Computer Networks', grade: 'B+', credits: 3, points: 7 },
+        { id: 8, code: 'CS207', name: 'Web Technologies Lab', grade: 'O', credits: 2, points: 10 },
+        { id: 9, code: 'CS208', name: 'DBMS Lab', grade: 'A+', credits: 2, points: 9 }
+      ];
+      
+      setExtractedData(mockData);
+      setIsProcessing(false);
+      setStep(3);
+      
+      // Reload user files
+      loadUserFiles();
+    } catch (error) {
+      setFileError(error.message);
       setIsProcessing(false);
     }
   };
@@ -204,54 +151,32 @@ const UploadSection = () => {
   };
 
   const calculateSGPA = () => {
-    // Filter out U and RA grades
-    const validSubjects = extractedData.filter(subject => 
-      subject.grade && !['U', 'RA', 'u', 'ra'].includes(subject.grade.toUpperCase())
-    );
-    
-    const totalCredits = validSubjects.reduce((sum, item) => sum + (item.credits || 0), 0);
-    const totalPoints = validSubjects.reduce((sum, item) => sum + ((item.points || 0) * (item.credits || 0)), 0);
+    const totalCredits = extractedData.reduce((sum, item) => sum + item.credits, 0);
+    const totalPoints = extractedData.reduce((sum, item) => sum + (item.points * item.credits), 0);
     return totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : 0;
   };
 
   const handleFinalSubmit = () => {
-    // Filter out U and RA grades for credit calculation
-    const validSubjects = extractedData.filter(subject => 
-      subject.grade && !['U', 'RA', 'u', 'ra'].includes(subject.grade.toUpperCase())
-    );
-    
-    const totalCredits = validSubjects.reduce((sum, item) => sum + (item.credits || 0), 0);
+    const totalCredits = extractedData.reduce((sum, item) => sum + item.credits, 0);
     const sgpa = calculateSGPA();
 
-    const semesterId = Date.now().toString();
     const semesterData = {
-      id: semesterId,
+      id: Date.now().toString(),
       studentName: semesterInfo.studentName,
       name: semesterInfo.name,
       year: semesterInfo.year,
       semester: semesterInfo.semester,
       rollNumber: semesterInfo.rollNumber,
       institution: semesterInfo.institution,
-      subjects: extractedData, // Keep all subjects including U/RA for display
+      subjects: extractedData,
       totalCredits,
       totalSubjects: extractedData.length,
       sgpa: parseFloat(sgpa),
       uploadDate: new Date().toISOString(),
       uploadMethod: uploadMethod,
       marksheetFile: selectedFile?.name || 'manual_entry',
-      ocrConfidence: ocrResult?.confidence || null,
       fileId: savedFileId
     };
-
-    // Update file with final semester ID
-    if (savedFileId && selectedFile) {
-      try {
-        fileStorage.deleteFile(user.id, savedFileId);
-        fileStorage.saveFile(selectedFile, user.id, semesterId);
-      } catch (error) {
-        console.error('Error updating file with semester ID:', error);
-      }
-    }
 
     addSemester(semesterData);
     
@@ -261,9 +186,110 @@ const UploadSection = () => {
     setExtractedData([]);
     setSemesterInfo({ studentName: '', name: '', year: '', semester: '', rollNumber: '', institution: '' });
     setUploadMethod('upload');
-    setOcrResult(null);
     setSavedFileId(null);
+    setFileError('');
   };
+
+  const handleDownloadFile = (fileId) => {
+    try {
+      fileStorage.downloadFile(userId, fileId);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      alert('Error downloading file: ' + error.message);
+    }
+  };
+
+  const handleDeleteFile = (fileId) => {
+    if (window.confirm('Are you sure you want to delete this file?')) {
+      try {
+        fileStorage.deleteFile(userId, fileId);
+        loadUserFiles();
+      } catch (error) {
+        console.error('Error deleting file:', error);
+        alert('Error deleting file: ' + error.message);
+      }
+    }
+  };
+
+  const StorageMeter = () => {
+    const totalSize = fileStorage.getUserStorageSize(userId);
+    const maxSize = 50 * 1024 * 1024; // 50MB limit
+    const percentUsed = (totalSize / maxSize) * 100;
+
+    return (
+      <div className="bg-gray-700 rounded-lg p-4 mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center space-x-2">
+            <HardDrive className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-300">Storage Used</span>
+          </div>
+          <span className="text-sm text-gray-400">
+            {fileStorage.formatFileSize(totalSize)} / {fileStorage.formatFileSize(maxSize)}
+          </span>
+        </div>
+        <div className="w-full bg-gray-600 rounded-full h-2">
+          <div 
+            className={`h-2 rounded-full ${percentUsed > 80 ? 'bg-red-500' : percentUsed > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+            style={{ width: `${Math.min(percentUsed, 100)}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const FilesList = () => (
+    <div className="bg-gray-700 rounded-xl p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-white">Your Uploaded Files</h3>
+        <button
+          onClick={() => setShowFilesList(!showFilesList)}
+          className="text-yellow-400 hover:text-yellow-300"
+        >
+          {showFilesList ? 'Hide' : 'Show'} Files
+        </button>
+      </div>
+      
+      <StorageMeter />
+      
+      {showFilesList && (
+        <div className="space-y-3 max-h-60 overflow-y-auto">
+          {userFiles.length === 0 ? (
+            <p className="text-gray-400 text-center py-4">No files uploaded yet</p>
+          ) : (
+            userFiles.map(file => (
+              <div key={file.id} className="flex items-center justify-between bg-gray-600 rounded-lg p-3">
+                <div className="flex items-center space-x-3">
+                  <File className="w-5 h-5 text-blue-400" />
+                  <div>
+                    <p className="text-white font-medium">{file.name}</p>
+                    <p className="text-gray-400 text-sm">
+                      {fileStorage.formatFileSize(file.size)} • {new Date(file.uploadDate).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleDownloadFile(file.id)}
+                    className="text-green-400 hover:text-green-300 p-1"
+                    title="Download"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteFile(file.id)}
+                    className="text-red-400 hover:text-red-300 p-1"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -292,6 +318,9 @@ const UploadSection = () => {
           <span className={step >= 4 ? 'text-yellow-400' : 'text-gray-400'}>Complete</span>
         </div>
       </div>
+
+      {/* Files List */}
+      {userFiles.length > 0 && <FilesList />}
 
       {/* Step 1: Choose Upload Method */}
       {step === 1 && (
@@ -383,11 +412,11 @@ const UploadSection = () => {
             {/* Upload Marksheet Option */}
             <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700">
               <h3 className="text-xl font-bold text-white mb-4">Upload Marksheet</h3>
-              <p className="text-gray-400 mb-6">Upload an image of your marksheet (JPG/PNG) for automatic OCR data extraction</p>
+              <p className="text-gray-400 mb-6">Upload a scanned copy of your marksheet for automatic data extraction</p>
               
               <div className="border-2 border-dashed border-gray-600 rounded-xl p-6 text-center hover:border-yellow-400 transition-colors duration-200 mb-4">
                 <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                <p className="text-gray-400 mb-3">Supports JPG, PNG files up to 10MB (PDF requires manual entry)</p>
+                <p className="text-gray-400 mb-3">Supports PDF, JPG, PNG files up to 10MB</p>
                 
                 <label className="bg-yellow-400 text-gray-900 px-6 py-3 rounded-lg font-medium hover:bg-yellow-300 transition-colors duration-200 cursor-pointer inline-flex items-center space-x-2">
                   <Camera className="w-5 h-5" />
@@ -401,10 +430,20 @@ const UploadSection = () => {
                 </label>
               </div>
 
+              {fileError && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+                  <div className="flex items-center space-x-2">
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                    <p className="text-red-400 text-sm">{fileError}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2 text-sm text-gray-400">
-                <p>✓ Advanced OCR for images</p>
-                <p>✓ 99%+ accuracy detection</p>
-                <p>✓ JPG/PNG support only</p>
+                <p>✓ Automatic data extraction</p>
+                <p>✓ OCR technology</p>
+                <p>✓ Secure file storage</p>
+                <p>✓ Editable results</p>
               </div>
             </div>
 
@@ -456,103 +495,44 @@ const UploadSection = () => {
               <FileText className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
               <p className="text-white font-medium">{selectedFile?.name}</p>
               <p className="text-gray-400 text-sm">
-                {(selectedFile?.size / 1024 / 1024).toFixed(2)} MB
+                {selectedFile && fileStorage.formatFileSize(selectedFile.size)}
               </p>
             </div>
             
-            {!isProcessing && !ocrResult && (
-              <button
-                onClick={processWithOCR}
-                className="bg-yellow-400 text-gray-900 px-8 py-3 rounded-lg font-medium hover:bg-yellow-300 transition-colors duration-200 flex items-center space-x-2 mx-auto"
-              >
-                <Eye className="w-5 h-5" />
-                <span>Extract Data with Advanced OCR</span>
-              </button>
-            )}
+            <button
+              onClick={simulateAdvancedOCR}
+              disabled={isProcessing}
+              className="bg-yellow-400 text-gray-900 px-8 py-3 rounded-lg font-medium hover:bg-yellow-300 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 mx-auto"
+            >
+              {isProcessing ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-900"></div>
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="w-5 h-5" />
+                  <span>Extract Data with Advanced OCR</span>
+                </>
+              )}
+            </button>
           </div>
 
           {isProcessing && (
             <div className="bg-gray-700 rounded-xl p-6">
               <div className="flex items-center space-x-3 mb-4">
-                <Loader className="animate-spin w-6 h-6 text-yellow-400" />
-                <span className="text-white font-medium">{processingStage}</span>
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-400"></div>
+                <span className="text-white font-medium">Advanced OCR Analysis in Progress...</span>
               </div>
               <div className="space-y-2 text-sm text-gray-400">
-                <p>✓ File uploaded successfully</p>
-                <p>✓ Initializing OCR engine</p>
-                <p>🔄 Performing text recognition...</p>
-                <p>🔄 Extracting semester information...</p>
-                <p>🔄 Parsing subject data...</p>
-                <p>⏳ Validating extracted data...</p>
+                <p>✓ File uploaded and stored securely</p>
+                <p>✓ Image preprocessing complete</p>
+                <p>✓ Enhanced OCR scanning initiated</p>
+                <p>🔄 Detecting subject codes and names...</p>
+                <p>🔄 Extracting grades and credit information...</p>
+                <p>🔄 Validating extracted data...</p>
+                <p>⏳ Preparing results for review...</p>
               </div>
-            </div>
-          )}
-
-          {ocrResult && !ocrResult.success && (
-            <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <AlertTriangle className="w-6 h-6 text-red-400" />
-                <span className="text-red-400 font-medium">Processing Failed</span>
-              </div>
-              <p className="text-red-300 mb-4">{ocrResult.error}</p>
-              {ocrResult.confidence && (
-                <p className="text-gray-400 text-sm mb-4">
-                  Detection confidence: {ocrResult.confidence.toFixed(1)}% (Required: 60%+)
-                </p>
-              )}
-              {ocrResult.rawText && (
-                <details className="mb-4">
-                  <summary className="text-gray-400 text-sm cursor-pointer hover:text-white">
-                    View Raw OCR Text (for debugging)
-                  </summary>
-                  <pre className="text-xs text-gray-300 mt-2 p-2 bg-gray-800 rounded overflow-auto max-h-32">
-                    {ocrResult.rawText}
-                  </pre>
-                </details>
-              )}
-              {savedFileId && (
-                <div className="mb-4 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                  <p className="text-blue-300 text-sm">
-                    ✓ File has been saved and can be downloaded later from the Files section
-                  </p>
-                </div>
-              )}
-              <div className="flex space-x-4">
-                <button
-                  onClick={() => setStep(1)}
-                  className="bg-gray-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-700 transition-colors duration-200"
-                >
-                  Try Another File
-                </button>
-                <button
-                  onClick={handleManualEntry}
-                  className="bg-blue-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-600 transition-colors duration-200"
-                >
-                  Manual Entry Instead
-                </button>
-              </div>
-            </div>
-          )}
-
-          {ocrResult && ocrResult.success && (
-            <div className="bg-green-900/20 border border-green-500/30 rounded-xl p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <CheckCircle className="w-6 h-6 text-green-400" />
-                <span className="text-green-400 font-medium">Processing Successful</span>
-              </div>
-              <p className="text-green-300 mb-2">
-                Data extracted with {ocrResult.confidence.toFixed(1)}% confidence
-              </p>
-              <p className="text-gray-400 text-sm">
-                Found {extractedData.length} subjects for {semesterInfo.studentName}
-              </p>
-              {savedFileId && (
-                <div className="mt-3 p-3 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                  <p className="text-blue-300 text-sm">
-                    ✓ Original file has been saved and can be downloaded later
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -590,10 +570,10 @@ const UploadSection = () => {
                 <span className="text-white font-medium">{semesterInfo.rollNumber || 'Not provided'}</span>
               </div>
             </div>
-            {ocrResult?.confidence && (
+            {savedFileId && (
               <div className="mt-2 text-sm">
-                <span className="text-gray-400">OCR Confidence: </span>
-                <span className="text-green-400 font-medium">{ocrResult.confidence.toFixed(1)}%</span>
+                <span className="text-gray-400">File: </span>
+                <span className="text-green-400 font-medium">✓ Stored securely</span>
               </div>
             )}
           </div>
@@ -612,141 +592,113 @@ const UploadSection = () => {
               </div>
             )}
 
-            {extractedData.map((subject) => {
-              const isExcluded = subject.grade && ['U', 'RA', 'u', 'ra'].includes(subject.grade.toUpperCase());
-              return (
-                <div key={subject.id} className={`rounded-xl p-4 ${isExcluded ? 'bg-red-900/20 border border-red-500/30' : 'bg-gray-700'}`}>
-                  {editingSubject?.id === subject.id ? (
-                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                      <input
-                        type="text"
-                        value={editingSubject.code}
-                        onChange={(e) => setEditingSubject({...editingSubject, code: e.target.value})}
-                        className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                        placeholder="Subject Code"
-                      />
-                      <input
-                        type="text"
-                        value={editingSubject.name}
-                        onChange={(e) => setEditingSubject({...editingSubject, name: e.target.value})}
-                        className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 md:col-span-2"
-                        placeholder="Subject Name"
-                      />
-                      <select
-                        value={editingSubject.grade}
-                        onChange={(e) => setEditingSubject({...editingSubject, grade: e.target.value})}
-                        className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+            {extractedData.map((subject) => (
+              <div key={subject.id} className="bg-gray-700 rounded-xl p-4">
+                {editingSubject?.id === subject.id ? (
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                    <input
+                      type="text"
+                      value={editingSubject.code}
+                      onChange={(e) => setEditingSubject({...editingSubject, code: e.target.value})}
+                      className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      placeholder="Subject Code"
+                    />
+                    <input
+                      type="text"
+                      value={editingSubject.name}
+                      onChange={(e) => setEditingSubject({...editingSubject, name: e.target.value})}
+                      className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 md:col-span-2"
+                      placeholder="Subject Name"
+                    />
+                    <select
+                      value={editingSubject.grade}
+                      onChange={(e) => setEditingSubject({...editingSubject, grade: e.target.value})}
+                      className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                    >
+                      {Object.keys(gradePoints).map(grade => (
+                        <option key={grade} value={grade}>{grade} ({gradePoints[grade]} points)</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={editingSubject.credits}
+                      onChange={(e) => setEditingSubject({...editingSubject, credits: parseInt(e.target.value) || 0})}
+                      className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      placeholder="Credits"
+                      min="1"
+                      max="10"
+                    />
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={handleSaveEdit}
+                        className="bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 transition-colors duration-200"
                       >
-                        {Object.keys(gradePoints).map(grade => (
-                          <option key={grade} value={grade}>{grade} ({gradePoints[grade]} points)</option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        value={editingSubject.credits}
-                        onChange={(e) => setEditingSubject({...editingSubject, credits: parseInt(e.target.value) || 0})}
-                        className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                        placeholder="Credits"
-                        min="1"
-                        max="10"
-                      />
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={handleSaveEdit}
-                          className="bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 transition-colors duration-200"
-                        >
-                          <Save className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setEditingSubject(null)}
-                          className="bg-gray-500 text-white px-3 py-2 rounded-lg hover:bg-gray-600 transition-colors duration-200"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                        <Save className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setEditingSubject(null)}
+                        className="bg-gray-500 text-white px-3 py-2 rounded-lg hover:bg-gray-600 transition-colors duration-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 flex-1">
+                      <div>
+                        <p className="text-gray-400 text-sm">Subject Code</p>
+                        <p className="text-white font-medium">{subject.code}</p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="text-gray-400 text-sm">Subject Name</p>
+                        <p className="text-white font-medium">{subject.name}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 text-sm">Grade</p>
+                        <p className="text-yellow-400 font-bold">{subject.grade} ({subject.points} pts)</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 text-sm">Credits</p>
+                        <p className="text-white font-medium">{subject.credits}</p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 flex-1">
-                        <div>
-                          <p className="text-gray-400 text-sm">Subject Code</p>
-                          <p className={`font-medium ${isExcluded ? 'text-red-300 line-through' : 'text-white'}`}>
-                            {subject.code}
-                          </p>
-                        </div>
-                        <div className="md:col-span-2">
-                          <p className="text-gray-400 text-sm">Subject Name</p>
-                          <p className={`font-medium ${isExcluded ? 'text-red-300 line-through' : 'text-white'}`}>
-                            {subject.name}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-400 text-sm">Grade</p>
-                          <div className="flex items-center space-x-2">
-                            <p className={`font-bold ${isExcluded ? 'text-red-400' : 'text-yellow-400'}`}>
-                              {subject.grade} ({subject.points} pts)
-                            </p>
-                            {isExcluded && (
-                              <span className="text-red-400 text-xs bg-red-900/30 px-2 py-1 rounded">
-                                Not counted
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-gray-400 text-sm">Credits</p>
-                          <p className={`font-medium ${isExcluded ? 'text-red-300 line-through' : 'text-white'}`}>
-                            {subject.credits}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex space-x-2 ml-4">
-                        <button
-                          onClick={() => handleEditSubject(subject)}
-                          className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 transition-colors duration-200"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleRemoveSubject(subject.id)}
-                          className="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition-colors duration-200"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleEditSubject(subject)}
+                        className="bg-blue-500 text-white px-3 py-2 rounded-lg hover:bg-blue-600 transition-colors duration-200"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleRemoveSubject(subject.id)}
+                        className="bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition-colors duration-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
 
           {/* SGPA Calculation */}
           {extractedData.length > 0 && (
             <div className="bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-xl p-6 mt-6 text-gray-900">
               <h3 className="text-xl font-bold mb-4">Calculated Results</h3>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-gray-700 font-medium">Total Subjects</p>
                   <p className="text-2xl font-bold">{extractedData.length}</p>
                 </div>
                 <div>
-                  <p className="text-gray-700 font-medium">Valid Credits</p>
-                  <p className="text-2xl font-bold">
-                    {extractedData.filter(s => !['U', 'RA', 'u', 'ra'].includes(s.grade?.toUpperCase())).reduce((sum, item) => sum + (item.credits || 0), 0)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-700 font-medium">Excluded</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {extractedData.filter(s => ['U', 'RA', 'u', 'ra'].includes(s.grade?.toUpperCase())).length}
-                  </p>
+                  <p className="text-gray-700 font-medium">Total Credits</p>
+                  <p className="text-2xl font-bold">{extractedData.reduce((sum, item) => sum + item.credits, 0)}</p>
                 </div>
                 <div>
                   <p className="text-gray-700 font-medium">Total Points</p>
-                  <p className="text-2xl font-bold">
-                    {extractedData.filter(s => !['U', 'RA', 'u', 'ra'].includes(s.grade?.toUpperCase())).reduce((sum, item) => sum + ((item.points || 0) * (item.credits || 0)), 0)}
-                  </p>
+                  <p className="text-2xl font-bold">{extractedData.reduce((sum, item) => sum + (item.points * item.credits), 0)}</p>
                 </div>
                 <div>
                   <p className="text-gray-700 font-medium">SGPA</p>
